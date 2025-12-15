@@ -1,3 +1,22 @@
+import shutil
+from google.colab import files
+
+# Define the base directory created earlier
+BASE_DIR = "/content/drive/MyDrive/Colab Notebooks/NLP_Assignment/climate_spellchecker"
+
+# Define the path for the ZIP archive
+ZIP_ARCHIVE_NAME = "climate_spellchecker_app"
+ZIP_PATH = f"/content/{ZIP_ARCHIVE_NAME}"
+
+print(f"Creating ZIP archive of: {BASE_DIR}")
+shutil.make_archive(ZIP_PATH, 'zip', BASE_DIR)
+print(f"ZIP archive created successfully at: {ZIP_PATH}.zip")
+
+# Download the ZIP file
+print("Downloading ZIP archive...")
+files.download(ZIP_PATH + ".zip")
+print("Download complete.")
+
 
 import streamlit as st
 import pandas as pd
