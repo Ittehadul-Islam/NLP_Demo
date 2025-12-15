@@ -21,8 +21,8 @@ st.set_page_config(
 # ------------------ LOAD MODELS ------------------
 @st.cache_resource
 def load_models():
-    vocab_path = DATA_DIR / "vocab_freq_pruned.csv"
-    bigram_path = DATA_DIR / "bigrams_pruned.csv"
+    vocab_path = BASE_DIR / "vocab_freq_pruned.csv"
+    bigram_path = BASE_DIR / "bigrams_pruned.csv"
 
     vocab_df = pd.read_csv(vocab_path)
     vocab = dict(zip(vocab_df.word, vocab_df.frequency))
