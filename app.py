@@ -80,15 +80,20 @@ def generate_candidates(prev, word, k):
 
 def render_annotated_text(tokens, error_map):
     html = ""
+
     for t in tokens:
         if t in error_map:
-            tooltip = "<br>".join([
-                f"<b>{c['word']}</b>",
-                f"Frequency: {c['frequency']}",
-                f"Score: {round(c['score'], 4)}",
-                c["definition"]
-                for c in error_map[t]
-            ])
+            tooltip_lines = []
+
+            for c in error_map[t]:
+                tooltip_lines.append(
+                    f"<b>{c['word']}</b>"
+                    f"<br>Frequency: {c['frequency']}"
+                    f"<br>Score: {round(c['score'], 4)}"
+                    f"<br>{c['definition']}"
+                )
+
+            tooltip = "<br><br>".join(tooltip_lines)
 
             html += f"""
             <span style="
@@ -102,6 +107,7 @@ def render_annotated_text(tokens, error_map):
             """
         else:
             html += t + " "
+
     return html
 
 
