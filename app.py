@@ -1,34 +1,16 @@
-import shutil
-from google.colab import files
-
-# Define the base directory created earlier
-BASE_DIR = "/content/drive/MyDrive/Colab Notebooks/NLP_Assignment/climate_spellchecker"
-
-# Define the path for the ZIP archive
-ZIP_ARCHIVE_NAME = "climate_spellchecker_app"
-ZIP_PATH = f"/content/{ZIP_ARCHIVE_NAME}"
-
-print(f"Creating ZIP archive of: {BASE_DIR}")
-shutil.make_archive(ZIP_PATH, 'zip', BASE_DIR)
-print(f"ZIP archive created successfully at: {ZIP_PATH}.zip")
-
-# Download the ZIP file
-print("Downloading ZIP archive...")
-files.download(ZIP_PATH + ".zip")
-print("Download complete.")
-
-
 import streamlit as st
 import pandas as pd
 from spellchecker import SpellChecker
 from utils import tokenize
 
+# ------------------ PAGE CONFIG ------------------
 st.set_page_config(
     page_title="Climate Policy Spell Checker",
     page_icon="🌍",
     layout="wide"
 )
 
+# ------------------ LOAD MODELS ------------------
 @st.cache_resource
 def load_models():
     vocab_df = pd.read_csv("data/vocab_freq_pruned.csv")
@@ -38,10 +20,14 @@ def load_models():
     bigram_probs = {
         (row.w1, row.w2): row.prob for _, row in bigram_df.iterrows()
     }
-    return SpellChecker(vocab, bigram_probs), vocab_df
+
+    checker = SpellChecker(vocab, bigram_probs)
+    return checker, vocab_df
+
 
 checker, vocab_df = load_models()
 
+# ------------------ UI ------------------
 st.title("🌍 Climate Policy Spell Correction System")
 
 st.sidebar.title("⚙️ Controls")
@@ -50,9 +36,11 @@ show_dict = st.sidebar.checkbox("Show Climate Dictionary")
 
 text = st.text_area("Enter text:", height=200)
 
+# ------------------ SPELL CHECK ------------------
 if st.button("Check Spelling"):
     tokens = tokenize(text)
     prev = "<s>"
+
     for t in tokens:
         if checker.is_non_word(t):
             suggestions = checker.correct(prev, t, max_suggestions)
@@ -61,6 +49,7 @@ if st.button("Check Spelling"):
             )
         prev = t
 
+# ------------------ DICTIONARY ------------------
 if show_dict:
     st.subheader("📘 Climate Dictionary")
     st.dataframe(vocab_df.head(100))
