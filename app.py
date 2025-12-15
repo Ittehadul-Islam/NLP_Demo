@@ -9,7 +9,7 @@ checker = None
 vocab_df = None
 
 BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = BASE_DIR / "data"
+DATA_DIR = BASE_DIR
 
 # ------------------ PAGE CONFIG ------------------
 st.set_page_config(
