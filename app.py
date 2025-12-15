@@ -11,21 +11,34 @@ st.set_page_config(
 )
 
 # ------------------ LOAD MODELS ------------------
+from pathlib import Path
+import streamlit as st
+import pandas as pd
+from spellchecker import SpellChecker
+
+BASE_DIR = Path(__file__).resolve().parent
+DATA_DIR = BASE_DIR / "data"
+
 @st.cache_resource
 def load_models():
-    vocab_df = pd.read_csv("data/vocab_freq_pruned.csv")
+    vocab_path = DATA_DIR / "vocab_freq_pruned.csv"
+    bigram_path = DATA_DIR / "bigrams_pruned.csv"
+
+    if not vocab_path.exists():
+        raise FileNotFoundError(f"Missing file: {vocab_path}")
+
+    if not bigram_path.exists():
+        raise FileNotFoundError(f"Missing file: {bigram_path}")
+
+    vocab_df = pd.read_csv(vocab_path)
     vocab = dict(zip(vocab_df.word, vocab_df.frequency))
 
-    bigram_df = pd.read_csv("data/bigrams_pruned.csv")
+    bigram_df = pd.read_csv(bigram_path)
     bigram_probs = {
         (row.w1, row.w2): row.prob for _, row in bigram_df.iterrows()
     }
 
-    checker = SpellChecker(vocab, bigram_probs)
-    return checker, vocab_df
-
-
-checker, vocab_df = load_models()
+    return SpellChecker(vocab, bigram_probs), vocab_df
 
 # ------------------ UI ------------------
 st.title("🌍 Climate Policy Spell Correction System")
