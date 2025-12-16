@@ -1,145 +1,144 @@
+pip install -r requirements.txt
+python -m spacy download en_core_web_sm
+
 import streamlit as st
 import pandas as pd
+import math
 from pathlib import Path
 from spellchecker import SpellChecker
 from utils import tokenize
+from metaphone import doublemetaphone
+import spacy
+from sentence_transformers import SentenceTransformer, util
 
-# ================== INIT ==================
-checker = None
-vocab_df = None
+# ===================== CONFIG =====================
+REAL_WORD_THRESHOLD = -12.0   # log trigram probability
+MAX_CONTEXT_WINDOW = 2
 
 BASE_DIR = Path(__file__).resolve().parent
 
-# ================== PAGE CONFIG ==================
+# ===================== LOAD MODELS =====================
+@st.cache_resource
+def load_resources():
+    vocab_df = pd.read_csv(BASE_DIR / "vocab_freq_pruned.csv")
+    bigram_df = pd.read_csv(BASE_DIR / "bigrams_pruned.csv")
+    trigram_df = pd.read_csv(BASE_DIR / "trigrams_pruned.csv")
+    pos_df = pd.read_csv(BASE_DIR / "vocab_pos.csv")
+
+    vocab = dict(zip(vocab_df.word, vocab_df.frequency))
+
+    bigram_probs = {
+        (r.w1, r.w2): r.prob for _, r in bigram_df.iterrows()
+    }
+
+    trigram_probs = {
+        (r.w1, r.w2, r.w3): math.log(r.prob) for _, r in trigram_df.iterrows()
+    }
+
+    pos_map = dict(zip(pos_df.word, pos_df.pos))
+
+    checker = SpellChecker(vocab, bigram_probs)
+    nlp = spacy.load("en_core_web_sm")
+    bert = SentenceTransformer("all-MiniLM-L6-v2")
+
+    return checker, trigram_probs, pos_map, vocab_df, nlp, bert
+
+checker, TRIGRAMS, POS_MAP, VOCAB_DF, NLP, BERT = load_resources()
+
+# ===================== PAGE =====================
 st.set_page_config(
-    page_title="Climate Policy Spell Checker",
+    page_title="Climate Policy Spell Correction System",
     page_icon="🌍",
     layout="wide"
 )
 
-# ================== LOAD MODELS ==================
-@st.cache_resource
-def load_models():
-    vocab_path = BASE_DIR / "vocab_freq_pruned.csv"
-    bigram_path = BASE_DIR / "bigrams_pruned.csv"
-
-    vocab_df = pd.read_csv(vocab_path)
-    vocab = dict(zip(vocab_df.word, vocab_df.frequency))
-
-    bigram_df = pd.read_csv(bigram_path)
-    bigram_probs = {
-        (row.w1, row.w2): row.prob for _, row in bigram_df.iterrows()
-    }
-
-    return SpellChecker(vocab, bigram_probs), vocab_df
-
-
-try:
-    checker, vocab_df = load_models()
-except Exception as e:
-    st.error(f"❌ Failed to load models: {e}")
-    st.stop()
-
-# ================== NLP HELPERS ==================
-def build_word_metadata(word, vocab_df):
-    freq_row = vocab_df[vocab_df.word == word]
-    frequency = int(freq_row.frequency.values[0]) if not freq_row.empty else 0
-
-    return {
-        "word": word,
-        "frequency": frequency,
-        "definition": (
-            "Domain-specific climate term"
-            if frequency > 0
-            else "Candidate correction from corpus"
-        )
-    }
-
-
-def detect_errors(tokens):
-    errors = []
-    prev = "<s>"
-    for t in tokens:
-        if checker.is_non_word(t):
-            errors.append((prev, t))
-        prev = t
-    return errors
-
-
-def generate_candidates(prev, word, k):
-    suggestions = checker.correct(prev, word, k)
-    enriched = []
-
-    for cand, score in suggestions:
-        meta = build_word_metadata(cand, vocab_df)
-        meta["score"] = score
-        enriched.append(meta)
-
-    return enriched
-
-
-def render_annotated_text(tokens, error_map):
-    html = ""
-
-    for t in tokens:
-        if t in error_map:
-            tooltip_lines = []
-
-            for c in error_map[t]:
-                tooltip_lines.append(
-                    f"<b>{c['word']}</b>"
-                    f"<br>Frequency: {c['frequency']}"
-                    f"<br>Score: {round(c['score'], 4)}"
-                    f"<br>{c['definition']}"
-                )
-
-            tooltip = "<br><br>".join(tooltip_lines)
-
-            html += f"""
-            <span style="
-                background-color:#ffcccc;
-                padding:2px 4px;
-                border-radius:4px;
-                cursor:pointer;"
-                title="{tooltip}">
-                {t}
-            </span> 
-            """
-        else:
-            html += t + " "
-
-    return html
-
-
-# ================== UI ==================
 st.title("🌍 Climate Policy Spell Correction System")
 
-st.sidebar.title("⚙️ Controls")
-max_suggestions = st.sidebar.slider("Max suggestions", 1, 5, 3)
-show_dict = st.sidebar.checkbox("Show Climate Dictionary")
+# ===================== SESSION =====================
+if "text" not in st.session_state:
+    st.session_state.text = ""
 
-text = st.text_area("Enter text:", height=200)
+# ===================== SIDEBAR =====================
+st.sidebar.header("⚙️ Controls")
+MAX_SUGGESTIONS = st.sidebar.slider("Max suggestions", 1, 7, 5)
+SHOW_DICT = st.sidebar.checkbox("Show Climate Dictionary")
 
-# ================== SPELL CHECK ==================
+# ===================== INPUT =====================
+st.session_state.text = st.text_area(
+    "Enter text:",
+    st.session_state.text,
+    height=200
+)
+
+# ===================== SCORING =====================
+def trigram_score(w2, w1, w):
+    return TRIGRAMS.get((w2, w1, w), -20.0)
+
+def phonetic_bonus(a, b):
+    return 1.0 if doublemetaphone(a)[0] == doublemetaphone(b)[0] else 0.0
+
+def pos_bonus(orig, cand):
+    return 1.0 if POS_MAP.get(orig) == POS_MAP.get(cand) else 0.0
+
+def bert_rerank(context, candidates):
+    ctx = BERT.encode(context, convert_to_tensor=True)
+    cand = BERT.encode(candidates, convert_to_tensor=True)
+    scores = util.cos_sim(ctx, cand)[0]
+    return dict(zip(candidates, scores.tolist()))
+
+def is_real_word_error(w2, w1, w):
+    return trigram_score(w2, w1, w) < REAL_WORD_THRESHOLD
+
+# ===================== SPELL CHECK =====================
 if st.button("Check Spelling"):
-    tokens = tokenize(text)
-    errors = detect_errors(tokens)
+    tokens = tokenize(st.session_state.text)
+    doc = NLP(" ".join(tokens))
+    pos_tags = {t.text: t.pos_ for t in doc}
 
-    error_map = {}
-    for prev, word in errors:
-        error_map[word] = generate_candidates(prev, word, max_suggestions)
+    st.subheader("🔎 Detected Issues")
 
-    st.subheader("🔎 Annotated Text")
-    annotated_html = render_annotated_text(tokens, error_map)
-    st.markdown(annotated_html, unsafe_allow_html=True)
+    prev2, prev1 = "<s>", "<s>"
 
-    st.subheader("📌 Suggested Corrections")
-    for word, cands in error_map.items():
-        st.markdown(
-            f"**{word}** → " + ", ".join([c["word"] for c in cands])
-        )
+    for idx, tok in enumerate(tokens):
 
-# ================== DICTIONARY ==================
-if show_dict and vocab_df is not None:
-    st.subheader("📘 Climate Dictionary (Sample)")
-    st.dataframe(vocab_df.head(100))
+        non_word = checker.is_non_word(tok)
+        real_word = not non_word and is_real_word_error(prev2, prev1, tok)
+
+        if non_word or real_word:
+            candidates = checker.correct(prev1, tok, MAX_SUGGESTIONS)
+            cand_words = [c[0] for c in candidates]
+
+            bert_scores = bert_rerank(f"{prev1} {tok}", cand_words)
+
+            ranked = []
+            for cand, _ in candidates:
+                score = (
+                    0.30 * math.log(checker.vocab.get(cand, 1))
+                    + 0.25 * trigram_score(prev2, prev1, cand)
+                    + 0.20 * phonetic_bonus(tok, cand)
+                    + 0.15 * pos_bonus(tok, cand)
+                    + 0.10 * bert_scores.get(cand, 0)
+                )
+                ranked.append((cand, score))
+
+            ranked.sort(key=lambda x: x[1], reverse=True)
+
+            st.markdown(
+                f"### ❌ `{tok}` "
+                + ("(Real-word error)" if real_word else "(Misspelling)")
+            )
+
+            cols = st.columns(len(ranked[:MAX_SUGGESTIONS]))
+            for i, (cand, _) in enumerate(ranked[:MAX_SUGGESTIONS]):
+                with cols[i]:
+                    if st.button(cand, key=f"{tok}_{idx}_{cand}"):
+                        tokens[idx] = cand
+                        st.session_state.text = " ".join(tokens)
+                        st.experimental_rerun()
+
+        prev2, prev1 = prev1, tok
+
+# ===================== DICTIONARY =====================
+if SHOW_DICT:
+    st.subheader("📘 Climate Dictionary")
+    st.dataframe(VOCAB_DF.head(200))
