@@ -1,3 +1,9 @@
+Metaphone==0.6
+
 streamlit
 pandas
+spacy
 textdistance
+sentence-transformers
+pyspellchecker
+Metaphone
